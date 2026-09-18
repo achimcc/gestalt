@@ -1,0 +1,17 @@
+[
+  {"enable": true, "protocol": "torrent", "priority": 1, "name": "qBittorrent", "implementation": "QBittorrent", "id": 1,
+   "fields": [
+     {"name": "host", "value": "10.0.0.5"},
+     {"name": "port", "value": 8080},
+     {"name": "useSsl", "value": false},
+     {"name": "username", "value": "arr"},
+     {"name": "password", "value": "EXAMPLE-not-a-real-password-1", "privacy": "password"}
+   ]},
+  {"enable": false, "protocol": "usenet", "priority": 1, "name": "SABnzbd", "implementation": "Sabnzbd", "id": 2,
+   "fields": [
+     {"name": "host", "value": "10.0.0.6"},
+     {"name": "port", "value": 8085},
+     {"name": "useSsl", "value": false},
+     {"name": "apiKey", "value": "0123456789abcdef0123456789abcdef", "privacy": "apiKey"}
+   ]}
+]

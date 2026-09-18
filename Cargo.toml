@@ -1,0 +1,18 @@
+[package]
+name = "gestalt"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Show the shape of a JSON document without showing its values"
+repository = "https://github.com/achimcc/gestalt"
+readme = "README.md"
+keywords = ["json", "secrets", "schema", "cli"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+indexmap = "2"
+lexopt = "0.3"
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+lto = true
