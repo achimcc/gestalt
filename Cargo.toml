@@ -1,6 +1,6 @@
 [package]
 name = "gestalt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "Show the shape of a JSON document without showing its values"
@@ -13,6 +13,7 @@ categories = ["command-line-utilities"]
 indexmap = "2"
 lexopt = "0.3"
 serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
 
 [profile.release]
 lto = true

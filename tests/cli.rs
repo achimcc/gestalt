@@ -173,3 +173,44 @@ fn file_argument() {
     assert!(o.status.success());
     assert!(String::from_utf8_lossy(&o.stdout).contains(".a  int"));
 }
+
+/// B91 (homeserver audit 3): `--show` on a secret-looking value is refused,
+/// exit 4, and the value appears nowhere — by class and by key name.
+#[test]
+fn show_refuses_what_looks_like_a_secret() {
+    let input = format!(
+        r#"{{"apiKey": "{CANARY}", "password": "short pw {CANARY}", "url": "https://x.example/p?k={CANARY}", "name": "plain name"}}"#
+    );
+    for p in [".apiKey", ".password", ".url"] {
+        let o = run(&["--show", p], &input);
+        assert_eq!(o.status.code(), Some(4), "{p}");
+        assert_no_canary(&o);
+        let (_, err) = text(&o);
+        assert!(err.contains("refused") && err.contains("--hash"), "{err}");
+    }
+    let o = run(&["--show", ".name"], &input);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(text(&o).0.contains("plain name"));
+}
+
+/// `--hash` answers "is it the same secret?" without the secret.
+#[test]
+fn hash_compares_without_showing() {
+    let a = format!(r#"{{"apiKey": "{CANARY}"}}"#);
+    let b = format!(r#"{{"apiKey": "{CANARY}x"}}"#);
+    let oa = run(&["--hash", ".apiKey"], &a);
+    let oa2 = run(&["--hash", ".apiKey"], &a);
+    let ob = run(&["--hash", ".apiKey"], &b);
+    assert!(oa.status.success());
+    assert_no_canary(&oa);
+    let h = |o: &Output| {
+        text(o)
+            .0
+            .split("sha256:")
+            .nth(1)
+            .map(|s| s[..64].to_owned())
+            .expect("a sha256 in the output")
+    };
+    assert_eq!(h(&oa), h(&oa2));
+    assert_ne!(h(&oa), h(&ob));
+}

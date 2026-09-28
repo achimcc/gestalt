@@ -16,7 +16,12 @@ in a row (JSON lines) are described together.
 
 OPTIONS:
     -s, --show PATH   print the values at PATH (a scalar path exactly as
-                      gestalt prints it, e.g. `.items[].name`); repeatable
+                      gestalt prints it, e.g. `.items[].name`); repeatable.
+                      REFUSED (exit 4) where a value looks like a secret:
+                      class token, hex, url or uuid, or a key named like
+                      *key*, *token*, *pass*, *secret*, *session*, …
+        --hash PATH   print SHA-256 of the values at PATH instead — to tell
+                      whether two secrets are the same; repeatable
     -n, --numbers     print the values of all numbers
     -h, --help        print this help
     -V, --version     print the version
@@ -29,6 +34,7 @@ EXIT STATUS:
     1  input unreadable, empty or not JSON
     2  usage error
     3  described, but a --show path matched nothing or only objects/arrays
+    4  described, but a --show path was refused (a value looked like a secret)
 ";
 
 struct Args {
@@ -39,6 +45,7 @@ struct Args {
 fn parse_args() -> Result<Option<Args>, lexopt::Error> {
     use lexopt::prelude::*;
     let mut show = HashSet::new();
+    let mut hash = HashSet::new();
     let mut numbers = false;
     let mut file = None;
     let mut parser = lexopt::Parser::from_env();
@@ -46,6 +53,9 @@ fn parse_args() -> Result<Option<Args>, lexopt::Error> {
         match arg {
             Short('s') | Long("show") => {
                 show.insert(parser.value()?.string()?);
+            }
+            Long("hash") => {
+                hash.insert(parser.value()?.string()?);
             }
             Short('n') | Long("numbers") => numbers = true,
             Short('h') | Long("help") => {
@@ -61,7 +71,11 @@ fn parse_args() -> Result<Option<Args>, lexopt::Error> {
         }
     }
     Ok(Some(Args {
-        opts: Options { show, numbers },
+        opts: Options {
+            show,
+            hash,
+            numbers,
+        },
         file,
     }))
 }
@@ -111,6 +125,13 @@ fn main() -> ExitCode {
     for p in &report.containers {
         eprintln!("gestalt: --show {p} holds only objects/arrays — show a scalar path below it");
         status = ExitCode::from(3);
+    }
+    // Last, so it wins over 3: a refused path is the answer that matters.
+    for p in &report.refused {
+        eprintln!(
+            "gestalt: --show {p} refused: a value there looks like a secret — to compare, use --hash {p}"
+        );
+        status = ExitCode::from(4);
     }
     status
 }

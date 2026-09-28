@@ -16,6 +16,9 @@ use serde_json::Value;
 
 pub struct Options {
     pub show: HashSet<String>,
+    /// Paths whose values are printed as SHA-256 only — the answer to "is it
+    /// the same secret?" without the secret.
+    pub hash: HashSet<String>,
     pub numbers: bool,
 }
 
@@ -26,6 +29,9 @@ pub struct Report {
     pub unmatched: Vec<String>,
     /// `--show` paths that only ever held objects or arrays.
     pub containers: Vec<String>,
+    /// `--show` paths refused because a value there looks like a secret
+    /// (class token/hex/url/uuid, or a key name like `apiKey`).
+    pub refused: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -82,6 +88,7 @@ pub fn describe(input: &[u8], opts: &Options) -> Result<Report, Error> {
         return Err(Error::Empty);
     }
     let mut collector = shape::Collector::new(&opts.show, opts.numbers);
+    collector.hash = &opts.hash;
     for doc in serde_json::Deserializer::from_slice(input).into_iter::<Value>() {
         match doc {
             Ok(v) => collector.add_document(&v),
@@ -98,6 +105,7 @@ pub fn describe(input: &[u8], opts: &Options) -> Result<Report, Error> {
     let mut unmatched: Vec<String> = opts
         .show
         .iter()
+        .chain(opts.hash.iter())
         .filter(|p| !collector.paths.contains_key(*p))
         .cloned()
         .collect();
@@ -114,10 +122,26 @@ pub fn describe(input: &[u8], opts: &Options) -> Result<Report, Error> {
         .cloned()
         .collect();
     containers.sort();
+    // A refused path shows nothing — not even the harmless values seen
+    // before the one that looked like a secret.
+    for st in collector.paths.values_mut() {
+        if st.refused {
+            st.values.clear();
+            st.values_more = 0;
+        }
+    }
+    let mut refused: Vec<String> = collector
+        .paths
+        .iter()
+        .filter(|(_, st)| st.refused)
+        .map(|(p, _)| p.clone())
+        .collect();
+    refused.sort();
     let text = render::render(&collector.paths, collector.documents, input.len());
     Ok(Report {
         text,
         unmatched,
         containers,
+        refused,
     })
 }

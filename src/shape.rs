@@ -41,11 +41,17 @@ pub struct Stats {
     pub values: Vec<(String, usize)>,
     /// Occurrences of values that did not fit into `values`.
     pub values_more: usize,
+    /// A `--show` asked for this path and a value here looked like a secret:
+    /// nothing is printed for it, and the run ends with exit 4.
+    pub refused: bool,
 }
 
 impl Stats {
     fn add_value(&mut self, v: &Value) {
-        let text = v.to_string();
+        self.add_text(v.to_string());
+    }
+
+    fn add_text(&mut self, text: String) {
         if let Some(e) = self.values.iter_mut().find(|(t, _)| *t == text) {
             e.1 += 1;
         } else if self.values.len() < VALUE_LIMIT {
@@ -71,7 +77,38 @@ pub struct Collector<'a> {
     pub paths: IndexMap<String, Stats>,
     pub documents: usize,
     show: &'a HashSet<String>,
+    pub hash: &'a HashSet<String>,
     numbers: bool,
+}
+
+static NO_PATHS: std::sync::LazyLock<HashSet<String>> = std::sync::LazyLock::new(HashSet::new);
+
+/// A key whose value is a credential by its name, whatever the value looks
+/// like: a 20-character password is `text` to the classifier.
+fn secret_name(path: &str) -> bool {
+    let last = path
+        .rsplit(['.', '['])
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c| c == '"' || c == ']')
+        .to_ascii_lowercase();
+    [
+        "key", "token", "pass", "secret", "announce", "tracker", "cookie", "credential",
+        "authorization", "session", "signature", "private",
+    ]
+    .iter()
+    .any(|w| last.contains(w))
+}
+
+fn sha256(v: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    let raw = match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    let d = Sha256::digest(raw.as_bytes());
+    let hex: String = d.iter().map(|b| format!("{b:02x}")).collect();
+    format!("\"sha256:{hex}\"")
 }
 
 impl<'a> Collector<'a> {
@@ -80,6 +117,7 @@ impl<'a> Collector<'a> {
             paths: IndexMap::new(),
             documents: 0,
             show,
+            hash: &NO_PATHS,
             numbers,
         }
     }
@@ -91,7 +129,9 @@ impl<'a> Collector<'a> {
 
     fn visit(&mut self, v: &Value, path: &str, named_in: Option<&str>, via_data_key: bool) {
         let shown = self.show.contains(path);
+        let hashed = self.hash.contains(path);
         let numbers = self.numbers;
+        let secret_key = secret_name(path);
         let st = self.paths.entry(path.to_owned()).or_insert_with(|| Stats {
             named_in: named_in.map(str::to_owned),
             via_data_key,
@@ -110,15 +150,26 @@ impl<'a> Collector<'a> {
                 } else {
                     st.ints += 1;
                 }
-                if shown || numbers {
+                if hashed {
+                    st.add_text(sha256(v));
+                } else if shown && secret_key {
+                    st.refused = true;
+                } else if (shown || numbers) && !secret_key {
                     st.add_value(v);
                 }
             }
             Value::String(s) => {
                 st.strings += 1;
                 widen(&mut st.str_len, s.chars().count());
-                *st.classes.entry(classify(s)).or_default() += 1;
-                if shown {
+                let class = classify(s);
+                *st.classes.entry(class).or_default() += 1;
+                if hashed {
+                    st.add_text(sha256(v));
+                } else if shown && (secret_key || class.is_secret_like()) {
+                    // B91 (homeserver audit 3): the rule "never --show a
+                    // token/hex/url" was discipline only. Now it is refused.
+                    st.refused = true;
+                } else if shown {
                     st.add_value(v);
                 }
             }

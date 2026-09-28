@@ -44,6 +44,12 @@ impl Class {
     /// Leaning towards "data" is the safe side: a field name folded into
     /// `{*}` costs readability, a token printed as a field name costs a
     /// rotation.
+    /// Values of these classes are credentials often enough that `--show`
+    /// refuses them (B91): a key, a hash, a URL with a passkey, an id.
+    pub fn is_secret_like(self) -> bool {
+        matches!(self, Class::Token | Class::Hex | Class::Url | Class::Uuid)
+    }
+
     pub fn is_data_like(self) -> bool {
         !matches!(self, Class::Empty | Class::Text)
     }

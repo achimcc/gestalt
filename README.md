@@ -75,12 +75,22 @@ not an empty result, because a filter with a typo looks exactly like a field
 that has no value. `--show` on an object or an array is refused, because
 it would print everything below it — name the scalar path you need.
 
+`--show` also refuses a path where a value looks like a secret (exit
+status 4): class `token`, `hex`, `url` or `uuid`, or a key whose name
+contains `key`, `token`, `pass`, `secret`, `session`, `cookie`, `credential`,
+`authorization`, `signature`, `private`, `announce` or `tracker`. Until 0.2.0
+that was a rule for the reader; a 20-character password is plain `text` to
+the classifier, so the key name counts as well. To tell whether two secrets
+are the same, use `--hash PATH`: it prints the SHA-256 of each value and
+nothing else.
+
 ## Usage
 
 ```
 gestalt [OPTIONS] [FILE]
 
-  -s, --show PATH   print the values at PATH; repeatable
+  -s, --show PATH   print the values at PATH; repeatable; refused for secrets
+      --hash PATH   print SHA-256 of the values at PATH; repeatable
   -n, --numbers     print the values of all numbers
   -h, --help
   -V, --version
@@ -88,7 +98,7 @@ gestalt [OPTIONS] [FILE]
 
 Exit status: `0` described, `1` input unreadable, empty or not JSON, `2`
 usage error, `3` described, but a `--show` path matched nothing or only
-objects/arrays.
+objects/arrays, `4` described, but a `--show` path was refused.
 
 ## Keeping the key out of argv as well
 
