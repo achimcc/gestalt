@@ -144,6 +144,59 @@ fn is_email(s: &str) -> bool {
         && !s.chars().any(char::is_whitespace)
 }
 
+/// Whether an object key is printed as a field name. Everything else is
+/// folded into `{*}` (B134, homeserver audit 3: "when in doubt, fold").
+///
+/// Up to 0.2.0 a key was printed unless it *looked like* data — and a
+/// 15-character key, a letters-only key, `Bearer …`, `user:pass` or
+/// `name@localhost` did not. Now the burden is reversed: a key is printed
+/// only if it *looks like* a field name, and a field name that folds costs
+/// readability, a secret that does not costs a rotation.
+///
+/// A field name is an identifier (`[A-Za-z_][A-Za-z0-9_-]{0,39}`) that no
+/// class claims (hex, token, …), with at most two runs of digits (`ipv4`,
+/// `x509Certificate`, `address_line_2` — not `a1b2c3d`) and at most two
+/// short camel-case humps (`getElementsByTagName` — not `QxmKpRsTvWza…`).
+/// What remains undetectable is a short word-like secret such as
+/// `hunter2`; that is the classifier's limit, not a field name.
+pub fn is_field_name(key: &str) -> bool {
+    let b = key.as_bytes();
+    let shape_ok = (1..=40).contains(&b.len())
+        && (b[0].is_ascii_alphabetic() || b[0] == b'_')
+        && b.iter()
+            .all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'-');
+    shape_ok && !classify(key).is_data_like() && digit_runs(b) <= 2 && short_humps(b) <= 2
+}
+
+fn digit_runs(b: &[u8]) -> usize {
+    b.iter()
+        .enumerate()
+        .filter(|&(i, c)| c.is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_digit()))
+        .count()
+}
+
+/// Camel-case words of one or two letters (`Kp`, `Rs`, `Q`): a random
+/// mixed-case string is full of them, a field name has one or two (`By`, `Id`).
+fn short_humps(b: &[u8]) -> usize {
+    // Word starts: an upper-case letter after a lower-case letter or a digit.
+    let starts: Vec<usize> = (1..b.len())
+        .filter(|&i| {
+            b[i].is_ascii_uppercase()
+                && (b[i - 1].is_ascii_lowercase() || b[i - 1].is_ascii_digit())
+        })
+        .collect();
+    starts
+        .iter()
+        .filter(|&&i| {
+            let lower = b[i + 1..]
+                .iter()
+                .take_while(|c| c.is_ascii_lowercase())
+                .count();
+            lower <= 1
+        })
+        .count()
+}
+
 /// Long, no spaces, letters AND digits: an API key, a passkey, a session id,
 /// a JWT. Plain identifiers like `ENABLE_ADDITIONAL_METRICS` have no digit
 /// and stay text.
@@ -198,6 +251,29 @@ mod tests {
             "v2",
         ] {
             assert!(!classify(k).is_data_like(), "{k}");
+            assert!(is_field_name(k), "{k}");
+        }
+    }
+
+    #[test]
+    fn doubtful_keys_are_not_field_names() {
+        for k in [
+            "Qx7mK2pR9sT4vW8",
+            "QxmKpRsTvWzaBcDeFgHj",
+            "a1b2c3d",
+            "admin:pw",
+            "Bearer x",
+            "a%2Bb",
+            "a@localhost",
+            "aa:bb:cc",
+            "x y",
+            "a.b",
+            "",
+            "1abc",
+            "a\u{9b}b",
+            "b\u{202e}evil",
+        ] {
+            assert!(!is_field_name(k), "{k:?}");
         }
     }
 }

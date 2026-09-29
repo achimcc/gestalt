@@ -155,10 +155,133 @@ fn json_lines_are_merged() {
 }
 
 #[test]
-fn control_characters_in_keys_are_escaped() {
+fn control_characters_in_keys_do_not_reach_the_terminal() {
+    // Since 0.3.0 (B135) such a key is not a field name at all and folds.
     let (out, _) = text(&run(&[], "{\"a\\u001b[31mb\": 1}"));
     assert!(!out.contains('\u{1b}'), "{out:?}");
-    assert!(out.contains(".\"a\\u001b[31mb\""), "{out}");
+    assert!(!out.contains("[31mb"), "{out}");
+    assert!(out.contains(".{*}  int"), "{out}");
+}
+
+/// B135 (homeserver audit 3, CD-6): serde_json escapes only U+0000..U+001F.
+/// DEL, the 8-bit CSI U+009B and the bidi override U+202E went to the
+/// terminal raw — in keys and in `--show` values. The audit's own input.
+const TERMINAL_CHARS: [char; 7] = [
+    '\u{7f}', '\u{9b}', '\u{85}', '\u{202e}', '\u{2066}', '\u{200f}', '\u{2028}',
+];
+
+fn assert_no_terminal_chars(o: &Output) {
+    for stream in [&o.stdout, &o.stderr] {
+        let s = String::from_utf8_lossy(stream);
+        for c in TERMINAL_CHARS {
+            assert!(!s.contains(c), "raw U+{:04X} in output: {s:?}", c as u32);
+        }
+    }
+}
+
+#[test]
+fn c1_del_and_bidi_in_keys_are_not_printed_raw() {
+    let o = run(
+        &[],
+        "{\"a\u{9b}31mX\":1,\"b\u{202e}evil\":2,\"c\u{7f}d\":3}",
+    );
+    assert!(o.status.success());
+    assert_no_terminal_chars(&o);
+}
+
+#[test]
+fn c1_del_and_bidi_in_shown_values_are_escaped() {
+    let o = run(
+        &["--show", ".note"],
+        "{\"note\": \"a\u{9b}31mX b\u{202e}evil c\u{7f}d e\u{85}f g\u{2066}h\u{200f}i\u{2028}j\"}",
+    );
+    assert_eq!(o.status.code(), Some(0));
+    assert_no_terminal_chars(&o);
+    let (out, _) = text(&o);
+    for esc in [
+        "\\u009b", "\\u202e", "\\u007f", "\\u0085", "\\u2066", "\\u200f", "\\u2028",
+    ] {
+        assert!(out.contains(esc), "{esc} missing: {out}");
+    }
+    // The visible rest is still there — escaped, not dropped.
+    assert!(out.contains("31mX b"), "{out}");
+}
+
+/// B134 (homeserver audit 3, CD-5): "when in doubt, fold". Keys that are
+/// credentials in practice but did not look like a token to the classifier
+/// were printed as field names. The audit's corpus (gs2_schluessel_korpus).
+#[test]
+fn secret_like_map_keys_fold() {
+    let keys = [
+        "Qx7mK2pR9sT4vW8z",                          // token16_alnum
+        "Qx7mK2pR9sT4vW8",                           // token15_alnum
+        "QxmKpRsTvWzaBcDeFgHj",                      // token, letters only
+        "Qx7!mK2pR9sT4vW8zQ",                        // password with special characters
+        "admin:Qx7mK2pR9sT",                         // basic auth user:pass
+        "Bearer Qx7mK2pR9sT4vW8z",                   // authorization header
+        "Qx7mK2pR%2BsT4vW8z",                        // percent-encoded
+        "achim@localhost",                           // e-mail without a dot in the domain
+        "someone@example.org",                       // e-mail
+        "secrets/Qx7mK2pR9s.key",                    // relative path
+        "/run/secrets/Qx7mK2pR9s",                   // absolute path
+        "a1b2c3d",                                   // hex, 7
+        "a1b2c3d4",                                  // hex, 8
+        "server.taile9e283.ts.net",                  // host name
+        "eyJhbGciOiJIUzI1NiJ9",                      // part of a JWT
+        "482913",                                    // TOTP
+        "aa:bb:cc:dd:ee:ff",                         // MAC address
+        "Jürgen Müller",                             // a person's name
+        "passkey=Qx7mK2pR9sT4",                      // announce passkey
+        "x7Kq2mZp9",                                 // short, mixed case and digits
+        "abcdefghijklmnopqrstuvwxyzabcdefghijklmno", // longer than 40
+    ];
+    for k in keys {
+        let input = serde_json::json!({"cfg": {"name": "a", k: {"user": "x"}}}).to_string();
+        let o = run(&[], &input);
+        assert!(o.status.success(), "{k}");
+        let (out, err) = text(&o);
+        assert!(
+            !out.contains(k) && !err.contains(k),
+            "{k:?} printed:\n{out}"
+        );
+        assert!(out.contains(".cfg.{*}.user"), "{k:?} not folded:\n{out}");
+        assert!(out.contains(".cfg.name"), "{out}");
+    }
+}
+
+/// The other side of B134: folding everything would make gestalt useless.
+/// Field names as real APIs spell them stay readable.
+#[test]
+fn field_names_stay_readable() {
+    let names = [
+        "name",
+        "apiKey",
+        "api_key",
+        "x-forwarded-for",
+        "Version",
+        "v2",
+        "ipv4",
+        "sha256",
+        "x509Certificate",
+        "oauth2Enabled",
+        "ec2InstanceId",
+        "address_line_2",
+        "getElementsByTagName",
+        "XMLHttpRequest",
+        "ENABLE_ADDITIONAL_METRICS",
+        "__name__",
+        "userId",
+        "isAdmin",
+        "ID",
+    ];
+    for k in names {
+        let input = serde_json::json!({ k: true }).to_string();
+        let (out, _) = text(&run(&[], &input));
+        assert!(
+            out.contains(&format!(".{k}  bool = true")),
+            "{k} folded:\n{out}"
+        );
+    }
 }
 
 #[test]

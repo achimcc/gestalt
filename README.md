@@ -59,10 +59,20 @@ followed by a rotation.
 | string | `string(len)` and its class — never the text |
 | number | `int` / `float` — the value only with `--numbers` or `--show` |
 | boolean, null | shown |
-| object key that is a field name (`apiKey`, `x-request-id`) | shown, JSON-quoted when it is not a plain identifier |
-| object key that looks like data (an id, a token, a hash, an IP address, an e-mail address, a URL, a path, a date) | folded into `{*}`; its values are described together |
-| control characters in keys | escaped, so a key cannot write to your terminal |
+| object key that is a field name (`apiKey`, `x-request-id`, `ipv4`) | shown |
+| any other object key (an id, a token, a hash, an IP address, an e-mail address, a URL, a path, a date, `Bearer …`, `user:pass`, a key with spaces or dots) | folded into `{*}`; its values are described together |
+| control, bidi and zero-width characters in a `--show` value | escaped as `\uXXXX`, so a value cannot write to your terminal |
 | input that is not JSON | characterised (`HTML or XML`, `text`, `binary`, `truncated or broken JSON`), never echoed |
+
+A key counts as a field name only when it *looks like* one: an identifier
+of at most 40 characters (`[A-Za-z_][A-Za-z0-9_-]*`) that no class claims,
+with at most two runs of digits (`x509Certificate`, not `a1b2c3d`) and at
+most two one- or two-letter camel-case words (`getElementsByTagName`, not
+`QxmKpRsTvWza…`). Everything else folds. Until 0.2.0 it was the other way
+round — a key was shown unless it looked like data — and a 15-character
+token, `Bearer …` or `name@localhost` as a map key went through. When in
+doubt, gestalt folds: a folded field name costs readability, a printed
+secret costs a rotation.
 
 Arrays are described as one element: `.items[]` merges every element, and
 `(in 40 of 42)` says that a field is missing from some of them. Several
@@ -117,9 +127,9 @@ printf 'header = "X-Api-Key: %s"\n' "$(cat /run/credentials/api-key)" | curl -s 
 
 - The classes are heuristics. A short secret (`hunter2`) is `text`, not
   `token` — but it is hidden all the same; the class never contains the value.
-- Field names are shown. A document that uses a secret as a *field name*
-  among ordinary field names is caught only when the name looks like data
-  (long, letters and digits, no spaces).
+- Field names are shown. A secret used as a map key is folded unless it
+  looks like a field name — a short word-like one (`hunter2`, a lower-case
+  passphrase without digits) still does.
 - The whole input is read into memory.
 
 ## Install

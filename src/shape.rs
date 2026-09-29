@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashSet};
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::classify::{Class, classify};
+use crate::classify::{Class, classify, is_field_name};
 
 /// How many distinct values a shown path keeps. Beyond that it only counts.
 pub const VALUE_LIMIT: usize = 20;
@@ -48,7 +48,11 @@ pub struct Stats {
 
 impl Stats {
     fn add_value(&mut self, v: &Value) {
-        self.add_text(v.to_string());
+        let text = match v {
+            Value::String(s) => quote(s),
+            other => other.to_string(),
+        };
+        self.add_text(text);
     }
 
     fn add_text(&mut self, text: String) {
@@ -93,8 +97,18 @@ fn secret_name(path: &str) -> bool {
         .trim_matches(|c| c == '"' || c == ']')
         .to_ascii_lowercase();
     [
-        "key", "token", "pass", "secret", "announce", "tracker", "cookie", "credential",
-        "authorization", "session", "signature", "private",
+        "key",
+        "token",
+        "pass",
+        "secret",
+        "announce",
+        "tracker",
+        "cookie",
+        "credential",
+        "authorization",
+        "session",
+        "signature",
+        "private",
     ]
     .iter()
     .any(|w| last.contains(w))
@@ -185,7 +199,7 @@ impl<'a> Collector<'a> {
                 st.objects += 1;
                 widen(&mut st.obj_keys, map.len());
                 for (key, value) in map {
-                    if classify(key).is_data_like() {
+                    if !is_field_name(key) {
                         self.visit(value, &child_path(path, ".{*}"), None, true);
                     } else {
                         let child = child_path(path, &format!(".{}", key_segment(key)));
@@ -211,19 +225,49 @@ fn child_path(parent: &str, segment: &str) -> String {
 }
 
 /// A field name as it appears in a path: bare when it is a plain identifier,
-/// JSON-quoted otherwise — which also escapes control characters, so a key
-/// cannot write escape sequences to the terminal.
+/// quoted otherwise. Since 0.3.0 every key that is printed at all is a plain
+/// identifier (`is_field_name`); the quoting stays as the second line.
 pub fn key_segment(key: &str) -> String {
     let mut chars = key.chars();
     let plain = chars
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-    if plain {
-        key.to_owned()
-    } else {
-        Value::String(key.to_owned()).to_string()
+    if plain { key.to_owned() } else { quote(key) }
+}
+
+/// A string as a JSON string literal that cannot act on a terminal.
+///
+/// serde_json escapes only U+0000..U+001F, `"` and `\`. DEL, the C1 controls
+/// (U+0080..U+009F, among them the 8-bit CSI U+009B) and the characters that
+/// reorder or hide text (bidi overrides and isolates, zero-width marks, line
+/// and paragraph separators) went to the terminal raw — so a key or a shown
+/// value could colour the screen or make one path look like another (B135,
+/// homeserver audit 3). They are written as `\uXXXX`, which is still JSON.
+pub fn quote(s: &str) -> String {
+    use std::fmt::Write as _;
+    let json = Value::String(s.to_owned()).to_string();
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        if is_terminal_hazard(c) {
+            let _ = write!(out, "\\u{:04x}", c as u32);
+        } else {
+            out.push(c);
+        }
     }
+    out
+}
+
+fn is_terminal_hazard(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061c}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{2069}'
+                | '\u{feff}'
+        )
 }
 
 #[cfg(test)]
@@ -242,7 +286,7 @@ mod tests {
     fn paths() {
         let p = collect(json!({"a": {"b": [1, {"c": null}]}, "x y": true}));
         let keys: Vec<_> = p.keys().map(String::as_str).collect();
-        assert_eq!(keys, [".", ".a", ".a.b", ".a.b[]", ".a.b[].c", ".\"x y\""]);
+        assert_eq!(keys, [".", ".a", ".a.b", ".a.b[]", ".a.b[].c", ".{*}"]);
     }
 
     #[test]
@@ -258,6 +302,20 @@ mod tests {
         let p = collect(json!({"users": {"1001": {"name": "a"}, "1002": {"name": "b"}}}));
         assert!(p.contains_key(".users.{*}.name"));
         assert!(p.keys().all(|k| !k.contains("1001")));
+    }
+
+    #[test]
+    fn quoted_keys_cannot_reach_the_terminal() {
+        for (key, want) in [
+            ("a\u{1b}[31m", r#""a\u001b[31m""#),
+            ("a\u{9b}31mX", r#""a\u009b31mX""#),
+            ("b\u{202e}evil", r#""b\u202eevil""#),
+            ("c\u{7f}d", r#""c\u007fd""#),
+            ("x y", r#""x y""#),
+        ] {
+            assert_eq!(key_segment(key), want);
+        }
+        assert_eq!(key_segment("apiKey"), "apiKey");
     }
 
     #[test]

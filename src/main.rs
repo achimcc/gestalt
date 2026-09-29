@@ -27,7 +27,7 @@ OPTIONS:
     -V, --version     print the version
 
 Strings and numbers are hidden by default; booleans and nulls are shown.
-Keys that look like data (ids, tokens, e-mail addresses, …) become `{*}`.
+Keys that are not plain field names (ids, tokens, `user:pass`, …) become `{*}`.
 
 EXIT STATUS:
     0  described
