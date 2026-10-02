@@ -15,5 +15,9 @@ lexopt = "0.3"
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 
+[lints.rust]
+# No `unsafe` anywhere in this crate, and no `#[allow]` can bring it back.
+unsafe_code = "forbid"
+
 [profile.release]
 lto = true
