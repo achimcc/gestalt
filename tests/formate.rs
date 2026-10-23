@@ -14,12 +14,9 @@ fn run(args: &[&str], input: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.as_bytes())
-        .unwrap();
+    // A usage error (`--format xml`) ends the process before it reads
+    // stdin; the write then fails with BrokenPipe, which is not a finding.
+    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
     child.wait_with_output().unwrap()
 }
 
