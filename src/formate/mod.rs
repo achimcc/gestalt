@@ -143,17 +143,33 @@ fn read_one(
 fn first_significant_byte(text: &str) -> Option<u8> {
     text.lines()
         .map(str::trim_start)
-        // YAML's own framing is skipped as well, and `--- {…}` counts as
-        // `{`: the guard must see the document the way YAML would.
-        .map(|l| l.strip_prefix("---").map_or(l, str::trim_start))
+        .map(yaml_framing_stripped)
         .find(|l| {
-            !l.is_empty()
-                && !l.starts_with('#')
-                && !l.starts_with(';')
-                && !l.starts_with('%')
-                && *l != "..."
+            !l.is_empty() && !l.starts_with('#') && !l.starts_with(';') && !l.starts_with('%')
         })
         .and_then(|l| l.as_bytes().first().copied())
+}
+
+/// What YAML would skip before the first node on a line: a document marker
+/// (`---`, `...`) and node properties (`!tag`, `&anchor`). The guard must
+/// see the document the way YAML does, or `--- !!map {…}` slips past it.
+fn yaml_framing_stripped(line: &str) -> &str {
+    let mut l = line.trim_start();
+    if let Some(rest) = l.strip_prefix("---").or_else(|| l.strip_prefix("..."))
+        && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+    {
+        l = rest.trim_start();
+    }
+    loop {
+        if l.starts_with('!') || l.starts_with('&') {
+            match l.find(char::is_whitespace) {
+                Some(i) => l = l[i..].trim_start(),
+                None => return "",
+            }
+        } else {
+            return l;
+        }
+    }
 }
 
 /// Reads the input in the forced format, or in the first format that takes
