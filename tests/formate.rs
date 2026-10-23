@@ -167,6 +167,8 @@ fn bom_or_comment_before_broken_json_stays_not_json() {
         format!("--- !!map {{\"user\": \"a\", \"{CANARY}\"}}"),
         format!("&a {{\"user\": \"a\", \"{CANARY}\"}}"),
         format!("...\n{{\"user\": \"a\", \"{CANARY}\"}}"),
+        format!("# note\u{2028}{{\"user\": \"a\", \"{CANARY}\"}}"),
+        format!("# note\r{{\"user\": \"a\", \"{CANARY}\"}}"),
     ] {
         let o = run(&[], &input);
         assert_eq!(o.status.code(), Some(1), "{input:?}: {}", text(&o).1);

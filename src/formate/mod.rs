@@ -141,7 +141,9 @@ fn read_one(
 /// blank lines and comment lines (`#`, `;`). Without this, `\u{feff}{…}`
 /// or `# note\n{…}` slipped past the `{` guard into YAML (review 2026-10-23).
 fn first_significant_byte(text: &str) -> Option<u8> {
-    text.lines()
+    // Every line break YAML knows, not only `\n`: a comment ended by U+2028
+    // or a bare `\r` would otherwise hide the `{` behind it.
+    text.split(|c| matches!(c, '\n' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}'))
         .map(str::trim_start)
         .map(yaml_framing_stripped)
         .find(|l| {
