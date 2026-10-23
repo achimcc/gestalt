@@ -143,7 +143,7 @@ fn read_one(
 fn first_significant_byte(text: &str) -> Option<u8> {
     // Every line break YAML knows, not only `\n`: a comment ended by U+2028
     // or a bare `\r` would otherwise hide the `{` behind it.
-    text.split(|c| matches!(c, '\n' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}'))
+    text.split(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])
         .map(str::trim_start)
         .map(yaml_framing_stripped)
         .find(|l| {
