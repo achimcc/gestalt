@@ -7,6 +7,7 @@
 //! `{*}`. A value is printed only for a path named with `--show`.
 
 pub mod classify;
+pub mod formate;
 pub mod render;
 pub mod shape;
 
