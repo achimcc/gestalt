@@ -161,6 +161,9 @@ fn bom_or_comment_before_broken_json_stays_not_json() {
     for input in [
         format!("\u{feff}{{\"user\": \"a\", \"{CANARY}\"}}"),
         format!("# note\n{{\"user\": \"a\", \"{CANARY}\"}}"),
+        format!("---\n{{\"user\": \"a\", \"{CANARY}\"}}"),
+        format!("%YAML 1.2\n---\n{{\"user\": \"a\", \"{CANARY}\"}}"),
+        format!("--- {{\"user\": \"a\", \"{CANARY}\"}}"),
     ] {
         let o = run(&[], &input);
         assert_eq!(o.status.code(), Some(1), "{input:?}: {}", text(&o).1);

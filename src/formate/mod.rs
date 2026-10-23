@@ -143,7 +143,16 @@ fn read_one(
 fn first_significant_byte(text: &str) -> Option<u8> {
     text.lines()
         .map(str::trim_start)
-        .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with(';'))
+        // YAML's own framing is skipped as well, and `--- {…}` counts as
+        // `{`: the guard must see the document the way YAML would.
+        .map(|l| l.strip_prefix("---").map_or(l, str::trim_start))
+        .find(|l| {
+            !l.is_empty()
+                && !l.starts_with('#')
+                && !l.starts_with(';')
+                && !l.starts_with('%')
+                && *l != "..."
+        })
         .and_then(|l| l.as_bytes().first().copied())
 }
 
