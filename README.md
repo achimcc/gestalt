@@ -105,7 +105,9 @@ input wins, and `--format` forces one. Three guards keep broken JSON from
 falling through to a more forgiving reader: input starting with `{` is JSON
 or nothing (`{"k": 1, oops}` is a valid YAML flow mapping), input starting
 with `[` never reaches YAML, and once JSON has read one document and then
-fails, it stays a JSON error. YAML only counts when the document is a
+fails, it stays a JSON error. The first significant byte is read after a
+BOM, blank lines and comment lines, so `# note` above broken JSON changes
+nothing (0.4.1). YAML only counts when the document is a
 mapping or a sequence — prose is one YAML scalar and is rejected instead.
 
 Every format is mapped onto the same tree, so paths, classes, `--show`,

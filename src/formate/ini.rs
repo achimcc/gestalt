@@ -63,7 +63,25 @@ pub const UNIT_SECTIONS: &[&str] = &[
     "Output",
     "Content",
     "Partition",
+    // Quadlet and the rest of systemd's families (review 2026-10-23).
+    "Pod",
+    "Volume",
+    "Image",
+    "Kube",
+    "Build",
+    "Quadlet",
+    "OOM",
+    "Time",
+    "PStore",
+    "IPv6AcceptRA",
+    "DHCPServer",
+    "Peer",
 ];
+
+/// A section counts as systemd's when it is in the list or vendor-prefixed.
+fn unit_section(name: &str) -> bool {
+    UNIT_SECTIONS.contains(&name) || name.starts_with("X-")
+}
 
 enum Line<'a> {
     Section(&'a str),
@@ -144,7 +162,10 @@ fn is_env_key(k: &str) -> bool {
 }
 
 /// Reads the document, or says why it is none of the three dialects.
-pub fn read(text: &str) -> Result<(Dialect, Value), Reject> {
+/// `forced` names the dialect `--format` asked for: then detection is
+/// off, and only a structural contradiction (sections in `.env`, no
+/// section in INI/unit) rejects.
+pub fn read(text: &str, forced: Option<Dialect>) -> Result<(Dialect, Value), Reject> {
     let lines = logical_lines(text);
     if lines.is_empty() {
         return Err(Reject("empty"));
@@ -152,8 +173,11 @@ pub fn read(text: &str) -> Result<(Dialect, Value), Reject> {
     let has_section = lines
         .iter()
         .any(|l| matches!(classify_line(l, true), Line::Section(_)));
-    if !has_section {
-        return read_env(&lines);
+    match (forced, has_section) {
+        (Some(Dialect::Env), true) => return Err(Reject("sections in a .env file")),
+        (Some(Dialect::Env), false) | (None, false) => return read_env(&lines),
+        (Some(_), false) => return Err(Reject("no section")),
+        _ => {}
     }
     // Sections first, keys per section, in document order.
     let mut sections: Vec<(String, Vec<(String, String)>)> = Vec::new();
@@ -179,9 +203,14 @@ pub fn read(text: &str) -> Result<(Dialect, Value), Reject> {
             Line::Other => return Err(Reject("line without key=value")),
         }
     }
-    let unit = sections
-        .iter()
-        .all(|(n, _)| UNIT_SECTIONS.contains(&n.as_str()));
+    // Unit, as soon as ONE section is systemd's: a Quadlet `[Pod]` or an
+    // `[X-…]` beside `[Service]` must not turn the file into INI with
+    // scalar, silently overwritten keys (review 2026-10-23).
+    let unit = match forced {
+        Some(Dialect::Unit) => true,
+        Some(Dialect::Ini) => false,
+        _ => sections.iter().any(|(n, _)| unit_section(n)),
+    };
     let mut root = Map::new();
     for (name, pairs) in sections {
         let mut obj = Map::new();
@@ -232,6 +261,7 @@ mod tests {
     fn unit_keys_are_arrays_and_values_hidden_in_tree() {
         let (d, v) = read(
             "[Unit]\nDescription=x\n[Service]\nExecStart=\nExecStart=/bin/a Zq7Canary\nEnvironment=A=1\n[Service]\nExecStartPre=/bin/b\n",
+            None,
         )
         .unwrap();
         assert_eq!(d, Dialect::Unit);
@@ -243,13 +273,13 @@ mod tests {
 
     #[test]
     fn continuation_lines_join() {
-        let (_, v) = read("[Service]\nExecStart=/bin/a \\\n  --flag\n").unwrap();
+        let (_, v) = read("[Service]\nExecStart=/bin/a \\\n  --flag\n", None).unwrap();
         assert_eq!(v["Service"]["ExecStart"][0], "/bin/a --flag");
     }
 
     #[test]
     fn ini_keys_are_scalars_colon_allowed() {
-        let (d, v) = read("; c\n[db]\nhost: h\nport=5\npassword = \"p=q\"\n").unwrap();
+        let (d, v) = read("; c\n[db]\nhost: h\nport=5\npassword = \"p=q\"\n", None).unwrap();
         assert_eq!(d, Dialect::Ini);
         assert_eq!(v["db"]["host"], "h");
         assert_eq!(v["db"]["password"], "p=q");
@@ -257,7 +287,7 @@ mod tests {
 
     #[test]
     fn env_value_is_everything_after_first_equals() {
-        let (d, v) = read("# c\nexport KEY=\"a=b=c\"\nTOKEN=abc==\n").unwrap();
+        let (d, v) = read("# c\nexport KEY=\"a=b=c\"\nTOKEN=abc==\n", None).unwrap();
         assert_eq!(d, Dialect::Env);
         assert_eq!(v["KEY"], "a=b=c");
         assert_eq!(v["TOKEN"], "abc==");
@@ -265,14 +295,14 @@ mod tests {
 
     #[test]
     fn prose_is_rejected() {
-        assert!(read("Hello world\nthis is text\n").is_err());
-        assert!(read("[Section]\nnot a pair\n").is_err());
-        assert!(read("\n\n").is_err());
+        assert!(read("Hello world\nthis is text\n", None).is_err());
+        assert!(read("[Section]\nnot a pair\n", None).is_err());
+        assert!(read("\n\n", None).is_err());
     }
 
     #[test]
     fn reject_carries_no_input() {
-        let e = read("Zq7Canary line\n").unwrap_err();
+        let e = read("Zq7Canary line\n", None).unwrap_err();
         assert!(!e.0.contains("Zq7"));
     }
 }

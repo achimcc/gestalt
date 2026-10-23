@@ -90,6 +90,9 @@ static NO_PATHS: std::sync::LazyLock<HashSet<String>> = std::sync::LazyLock::new
 /// A key whose value is a credential by its name, whatever the value looks
 /// like: a 20-character password is `text` to the classifier.
 fn secret_name(path: &str) -> bool {
+    // `.apiKeys[]` is still named `apiKeys`: the array suffix is not the key.
+    // Since 0.4.1 — in a unit file every key is an array (review 2026-10-23).
+    let path = path.trim_end_matches("[]");
     let last = path
         .rsplit(['.', '['])
         .next()

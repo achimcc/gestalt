@@ -108,25 +108,43 @@ fn read_json(input: &[u8]) -> Result<Vec<Value>, (usize, String)> {
     Ok(docs)
 }
 
-fn read_one(format: Format, input: &[u8], text: &str) -> Result<Vec<Value>, &'static str> {
+fn read_one(
+    format: Format,
+    input: &[u8],
+    text: &str,
+    forced: bool,
+) -> Result<Vec<Value>, &'static str> {
+    let dialect = |f: Format| match f {
+        Format::Unit => Dialect::Unit,
+        Format::Ini => Dialect::Ini,
+        _ => Dialect::Env,
+    };
     match format {
         Format::Json => read_json(input).map_err(|_| "not json"),
         Format::Toml => toml::read(text).map(|v| vec![v]).map_err(|r| r.0),
         Format::Yaml => yaml::read(text).map_err(|r| r.0),
         Format::Unit | Format::Ini | Format::Env => {
-            let (dialect, v) = ini::read(text).map_err(|r| r.0)?;
-            let got = match dialect {
-                Dialect::Unit => Format::Unit,
-                Dialect::Ini => Format::Ini,
-                Dialect::Env => Format::Env,
-            };
-            if got == format {
+            // Forced: the dialect is given, only a structural contradiction
+            // rejects. Detected: the reader decides, and must agree.
+            let want = forced.then(|| dialect(format));
+            let (got, v) = ini::read(text, want).map_err(|r| r.0)?;
+            if got == dialect(format) {
                 Ok(vec![v])
             } else {
                 Err("other dialect")
             }
         }
     }
+}
+
+/// The first byte that decides between JSON and the rest: after a BOM,
+/// blank lines and comment lines (`#`, `;`). Without this, `\u{feff}{…}`
+/// or `# note\n{…}` slipped past the `{` guard into YAML (review 2026-10-23).
+fn first_significant_byte(text: &str) -> Option<u8> {
+    text.lines()
+        .map(str::trim_start)
+        .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with(';'))
+        .and_then(|l| l.as_bytes().first().copied())
 }
 
 /// Reads the input in the forced format, or in the first format that takes
@@ -138,6 +156,9 @@ pub fn parse(input: &[u8], forced: Option<Format>) -> Result<Parsed, ParseError>
     let Ok(text) = std::str::from_utf8(input) else {
         return Err(ParseError::NotUtf8);
     };
+    // A byte-order mark is not whitespace to the parsers; drop it once.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let input = text.as_bytes();
     let comments = comment_lines(text);
     let done = |format: Format, documents: Vec<Value>| Parsed {
         format,
@@ -146,7 +167,7 @@ pub fn parse(input: &[u8], forced: Option<Format>) -> Result<Parsed, ParseError>
     };
 
     if let Some(f) = forced {
-        return match (f, read_one(f, input, text)) {
+        return match (f, read_one(f, input, text, true)) {
             (_, Ok(docs)) => Ok(done(f, docs)),
             (Format::Json, Err(_)) => {
                 let (documents, reason) = read_json(input).err().unwrap_or_default();
@@ -156,7 +177,7 @@ pub fn parse(input: &[u8], forced: Option<Format>) -> Result<Parsed, ParseError>
         };
     }
 
-    let first = text.trim_start().as_bytes().first().copied();
+    let first = first_significant_byte(text);
     match read_json(input) {
         Ok(docs) => return Ok(done(Format::Json, docs)),
         Err((documents, reason)) if documents > 0 || first == Some(b'{') => {
@@ -178,7 +199,7 @@ pub fn parse(input: &[u8], forced: Option<Format>) -> Result<Parsed, ParseError>
     let mut tried = vec!["json"];
     for &f in candidates {
         tried.push(f.name());
-        if let Ok(docs) = read_one(f, input, text) {
+        if let Ok(docs) = read_one(f, input, text, false) {
             return Ok(done(f, docs));
         }
     }

@@ -153,3 +153,69 @@ fn help_mentions_formats() {
         "{out}"
     );
 }
+
+/// Review 2026-10-23, Critical 1: a BOM or a comment line before broken
+/// JSON must not route it past the `{` guard into YAML.
+#[test]
+fn bom_or_comment_before_broken_json_stays_not_json() {
+    for input in [
+        format!("\u{feff}{{\"user\": \"a\", \"{CANARY}\"}}"),
+        format!("# note\n{{\"user\": \"a\", \"{CANARY}\"}}"),
+    ] {
+        let o = run(&[], &input);
+        assert_eq!(o.status.code(), Some(1), "{input:?}: {}", text(&o).1);
+        assert_no_canary(&o);
+        assert!(text(&o).1.contains("not JSON"), "{}", text(&o).1);
+    }
+    let (out, _) = text(&run(&[], "\u{feff}{\"a\": 1}"));
+    assert!(out.starts_with("# 1 document, "), "{out}");
+}
+
+/// Review 2026-10-23, Critical 2: the key-name refusal must hold on array
+/// paths — in a unit file every key is one.
+#[test]
+fn secret_key_name_is_refused_on_array_paths() {
+    let o = run(
+        &["--show", ".Container.Secret[]"],
+        &format!("[Container]\nSecret={CANARY}\n"),
+    );
+    assert_eq!(o.status.code(), Some(4), "{}", text(&o).1);
+    assert_no_canary(&o);
+    let o = run(
+        &["--show", ".apiKeys[]"],
+        &format!("{{\"apiKeys\": [\"{CANARY}\"]}}"),
+    );
+    assert_eq!(o.status.code(), Some(4));
+    assert_no_canary(&o);
+}
+
+/// Review 2026-10-23, Important 3: `--format` forces the dialect instead
+/// of demanding that detection agrees.
+#[test]
+fn forced_dialect_overrides_detection() {
+    let (out, err) = text(&run(&["--format", "unit"], "[X-Custom]\nFoo=bar\n"));
+    assert!(out.starts_with("# 1 document (unit)"), "{out}{err}");
+    assert!(out.contains(".X-Custom.Foo[]"), "{out}");
+    let (out, err) = text(&run(&["--format", "ini"], "[Service]\nExecStart=a\n"));
+    assert!(out.starts_with("# 1 document (ini)"), "{out}{err}");
+    assert!(out.contains(".Service.ExecStart  "), "{out}");
+    let o = run(&["--format", "env"], "[Service]\nExecStart=a\n");
+    assert_eq!(o.status.code(), Some(1));
+}
+
+/// Review 2026-10-23, Important 4: one unknown section (Quadlet, `X-…`)
+/// must not turn the whole file into INI with scalar, overwritten keys.
+#[test]
+fn unknown_section_keeps_unit_dialect() {
+    let (out, _) = text(&run(
+        &[],
+        "[Service]\nExecStart=a\nExecStart=b\n[X-Custom]\nFoo=bar\n",
+    ));
+    assert!(out.starts_with("# 1 document (unit)"), "{out}");
+    assert!(
+        out.contains(".Service.ExecStart[]") && out.contains("array[2]"),
+        "{out}"
+    );
+    let (out, _) = text(&run(&[], "[Pod]\nPodName=x\n[Volume]\nDriver=y\n"));
+    assert!(out.starts_with("# 1 document (unit)"), "{out}");
+}
