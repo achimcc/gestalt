@@ -12,8 +12,11 @@ categories = ["command-line-utilities"]
 [dependencies]
 indexmap = "2"
 lexopt = "0.3"
+serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
+serde_norway = "0.9"
 sha2 = "0.10"
+toml = { version = "0.9", features = ["preserve_order"] }
 
 [lints.rust]
 # No `unsafe` anywhere in this crate, and no `#[allow]` can bring it back.
