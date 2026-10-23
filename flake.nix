@@ -1,5 +1,5 @@
 {
-  description = "Show the shape of a JSON document without showing its values";
+  description = "Show the shape of a document (JSON, YAML, TOML, INI, .env, unit files) without showing its values";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
   # The RustSec advisory database, pinned like any other input. The `audit`
@@ -32,7 +32,7 @@
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
           meta = {
-            description = "Show the shape of a JSON document without showing its values";
+            description = "Show the shape of a document (JSON, YAML, TOML, INI, .env, unit files) without showing its values";
             homepage = "https://github.com/achimcc/gestalt";
             license = pkgs.lib.licenses.agpl3Only;
             mainProgram = "gestalt";

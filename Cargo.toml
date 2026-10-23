@@ -1,9 +1,9 @@
 [package]
 name = "gestalt"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-description = "Show the shape of a JSON document without showing its values"
+description = "Show the shape of a document (JSON, YAML, TOML, INI, .env, unit files) without showing its values"
 repository = "https://github.com/achimcc/gestalt"
 readme = "README.md"
 keywords = ["json", "secrets", "schema", "cli"]

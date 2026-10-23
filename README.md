@@ -1,6 +1,7 @@
 # gestalt
 
-Shows the shape of a JSON document without showing its values.
+Shows the shape of a document without showing its values — JSON, YAML, TOML,
+INI, `.env` and systemd unit files.
 
 The example below is [`examples/downloadclient.json`](examples/downloadclient.json),
 shaped like the answer of a Radarr download-client endpoint; the password
@@ -62,7 +63,8 @@ followed by a rotation.
 | object key that is a field name (`apiKey`, `x-request-id`, `ipv4`) | shown |
 | any other object key (an id, a token, a hash, an IP address, an e-mail address, a URL, a path, a date, `Bearer …`, `user:pass`, a key with spaces or dots) | folded into `{*}`; its values are described together |
 | control, bidi and zero-width characters in a `--show` value | escaped as `\uXXXX`, so a value cannot write to your terminal |
-| input that is not JSON | characterised (`HTML or XML`, `text`, `binary`, `truncated or broken JSON`), never echoed |
+| comment lines (`#`, `;`) in YAML, TOML, INI, `.env`, unit files | counted in the header (`3 comment lines not shown`), never shown — a comment carries a password as easily as a value |
+| input in no known format | characterised (`HTML or XML`, `text`, `key=value lines`, `binary`, `truncated or broken JSON`), never echoed |
 
 A key counts as a field name only when it *looks like* one: an identifier
 of at most 40 characters (`[A-Za-z_][A-Za-z0-9_-]*`) that no class claims,
@@ -94,11 +96,41 @@ the classifier, so the key name counts as well. To tell whether two secrets
 are the same, use `--hash PATH`: it prints the SHA-256 of each value and
 nothing else.
 
+## Formats
+
+Since 0.4.0 the format is told from the content, never from a file name
+(stdin from `ssh host cat /etc/foo.yaml` has none). The order is JSON,
+unit file, TOML, INI, `.env`, YAML; the first reader that takes the whole
+input wins, and `--format` forces one. Three guards keep broken JSON from
+falling through to a more forgiving reader: input starting with `{` is JSON
+or nothing (`{"k": 1, oops}` is a valid YAML flow mapping), input starting
+with `[` never reaches YAML, and once JSON has read one document and then
+fails, it stays a JSON error. YAML only counts when the document is a
+mapping or a sequence — prose is one YAML scalar and is rejected instead.
+
+Every format is mapped onto the same tree, so paths, classes, `--show`,
+`--hash` and the refusal of secret-looking values work alike:
+
+| Format | Mapping |
+|---|---|
+| YAML | mappings and sequences as objects and arrays; several `---` documents merged like JSON lines; a non-string key gets its text form and then folds; a tag (`!secret x`) is dropped and its value described as a string |
+| TOML | tables and arrays; dates and times as strings (class `date`/`datetime`) |
+| unit file | `[Section]` as object; **every key is an array** (`.Service.ExecStart[]`), because systemd lets any setting repeat and the path must not depend on how often; `\` continuation lines joined; a file counts as a unit file when every section is one systemd knows |
+| INI | `[Section]` as object, scalar keys, `=` or `:` as separator, a repeated key overwrites |
+| `.env` | `KEY=value` lines, optional `export`; the value is everything after the first `=` |
+
+The YAML reader is `serde_norway`, which sits on a C-to-Rust translation
+of libyaml with plenty of `unsafe` inside; gestalt's own code forbids
+`unsafe`, and `cargo audit` runs against the pinned advisory database on
+every build. The INI/unit/`.env` reader is gestalt's own, because no crate
+reads all three the way they are written in practice.
+
 ## Usage
 
 ```
 gestalt [OPTIONS] [FILE]
 
+  -f, --format FMT  read as json, yaml, toml, ini, env or unit instead of detecting
   -s, --show PATH   print the values at PATH; repeatable; refused for secrets
       --hash PATH   print SHA-256 of the values at PATH; repeatable
   -n, --numbers     print the values of all numbers
@@ -106,7 +138,7 @@ gestalt [OPTIONS] [FILE]
   -V, --version
 ```
 
-Exit status: `0` described, `1` input unreadable, empty or not JSON, `2`
+Exit status: `0` described, `1` input unreadable, empty or in no known format, `2`
 usage error, `3` described, but a `--show` path matched nothing or only
 objects/arrays, `4` described, but a `--show` path was refused.
 
@@ -131,6 +163,10 @@ printf 'header = "X-Api-Key: %s"\n' "$(cat /run/credentials/api-key)" | curl -s 
   looks like a field name — a short word-like one (`hunter2`, a lower-case
   passphrase without digits) still does.
 - The whole input is read into memory.
+- A `.env` file made only of numbers and booleans (`PORT=8080`) is valid
+  TOML and is read as such; the shape is the same, only the header says
+  `(toml)`.
+- Nix files are expressions, not values: `nix eval --json … | gestalt`.
 
 ## Install
 

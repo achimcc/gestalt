@@ -144,3 +144,12 @@ fn json_header_is_unchanged() {
     let (out, _) = text(&run(&[], r#"{"a": 1}"#));
     assert!(out.starts_with("# 1 document, 8 bytes\n"), "{out}");
 }
+
+#[test]
+fn help_mentions_formats() {
+    let (out, _) = text(&run(&["--help"], ""));
+    assert!(
+        out.contains("--format") && out.contains("YAML") && out.contains("unit"),
+        "{out}"
+    );
+}
