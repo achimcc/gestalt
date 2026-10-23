@@ -9,14 +9,29 @@ use crate::shape::Stats;
 /// Paths longer than this do not push every other line to the right.
 const MAX_PATH_COLUMN: usize = 48;
 
-pub fn render(paths: &IndexMap<String, Stats>, documents: usize, bytes: usize) -> String {
+/// What the first line says about the input as a whole.
+pub struct Header {
+    pub documents: usize,
+    pub bytes: usize,
+    /// `None` for JSON — its header line is unchanged since 0.1.
+    pub format: Option<&'static str>,
+    pub comment_lines: usize,
+}
+
+pub fn render(paths: &IndexMap<String, Stats>, header: &Header) -> String {
     let mut out = String::new();
-    let docs = if documents == 1 {
+    let docs = if header.documents == 1 {
         "1 document".to_owned()
     } else {
-        format!("{documents} documents")
+        format!("{} documents", header.documents)
     };
-    let _ = writeln!(out, "# {docs}, {bytes} bytes");
+    let fmt = header.format.map(|f| format!(" ({f})")).unwrap_or_default();
+    let comments = match header.comment_lines {
+        0 => String::new(),
+        1 => ", 1 comment line not shown".to_owned(),
+        n => format!(", {n} comment lines not shown"),
+    };
+    let _ = writeln!(out, "# {docs}{fmt}, {} bytes{comments}", header.bytes);
     let width = paths
         .keys()
         .map(|p| p.chars().count())

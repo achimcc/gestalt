@@ -5,16 +5,21 @@ use std::process::ExitCode;
 use gestalt::{Options, describe};
 
 const HELP: &str = "\
-gestalt — show the shape of a JSON document without showing its values
+gestalt — show the shape of a document without showing its values
 
 USAGE:
     gestalt [OPTIONS] [FILE]
     curl -s … | gestalt [OPTIONS]
 
-Reads FILE, or standard input when FILE is missing or `-`. Several documents
-in a row (JSON lines) are described together.
+Reads FILE, or standard input when FILE is missing or `-`. JSON, YAML, TOML,
+INI, `.env` and systemd unit files are told apart by content (since 0.4.0);
+several documents in a row (JSON lines, YAML `---`) are described together.
+Comment lines are counted, never shown. In a unit file every key is a list
+(`.Service.ExecStart[]`), because systemd lets every setting repeat.
 
 OPTIONS:
+    -f, --format FMT  read the input as json, yaml, toml, ini, env or unit
+                      instead of detecting the format
     -s, --show PATH   print the values at PATH (a scalar path exactly as
                       gestalt prints it, e.g. `.items[].name`); repeatable.
                       REFUSED (exit 4) where a value looks like a secret:
@@ -31,7 +36,7 @@ Keys that are not plain field names (ids, tokens, `user:pass`, …) become `{*}`
 
 EXIT STATUS:
     0  described
-    1  input unreadable, empty or not JSON
+    1  input unreadable, empty or in no known format
     2  usage error
     3  described, but a --show path matched nothing or only objects/arrays
     4  described, but a --show path was refused (a value looked like a secret)
@@ -47,6 +52,7 @@ fn parse_args() -> Result<Option<Args>, lexopt::Error> {
     let mut show = HashSet::new();
     let mut hash = HashSet::new();
     let mut numbers = false;
+    let mut format = None;
     let mut file = None;
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -58,6 +64,14 @@ fn parse_args() -> Result<Option<Args>, lexopt::Error> {
                 hash.insert(parser.value()?.string()?);
             }
             Short('n') | Long("numbers") => numbers = true,
+            Short('f') | Long("format") => {
+                let v = parser.value()?.string()?;
+                format = Some(gestalt::formate::Format::parse(&v).ok_or_else(|| {
+                    lexopt::Error::Custom(
+                        format!("unknown format `{v}` (json, yaml, toml, ini, env, unit)").into(),
+                    )
+                })?);
+            }
             Short('h') | Long("help") => {
                 print!("{HELP}");
                 return Ok(None);
@@ -73,6 +87,7 @@ fn parse_args() -> Result<Option<Args>, lexopt::Error> {
     Ok(Some(Args {
         opts: Options {
             show,
+            format,
             hash,
             numbers,
         },
